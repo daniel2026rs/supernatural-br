@@ -1,11 +1,13 @@
 
 const { addonBuilder, serveHTTP } = require("stremio-addon-sdk");
 
+const SHOW_ID = "tt0460681";
+
 const manifest = {
   id: "community.supernatural.br",
-  version: "1.0.0",
+  version: "1.1.0",
   name: "Supernatural BR",
-  description: "Catálogo dedicado à série Supernatural",
+  description: "As 15 temporadas de Supernatural",
   resources: ["catalog", "meta"],
   types: ["series"],
   catalogs: [
@@ -15,35 +17,76 @@ const manifest = {
       name: "Supernatural BR"
     }
   ],
-  idPrefixes: ["tt"]
+  idPrefixes: [SHOW_ID]
 };
 
 const builder = new addonBuilder(manifest);
 
-const supernatural = {
-  id: "tt0460681",
-  type: "series",
-  name: "Supernatural",
-  description: "Sam e Dean Winchester enfrentam forças sobrenaturais.",
-  genres: ["Drama", "Fantasia", "Terror"]
-};
+async function getShow() {
+  const response = await fetch(
+    "https://api.tvmaze.com/singlesearch/shows?q=Supernatural&embed=episodes"
+  );
 
-builder.defineCatalogHandler(({ type, id }) => {
-  if (type === "series" && id === "supernatural-br") {
-    return Promise.resolve({
-      metas: [supernatural]
-    });
+  if (!response.ok) {
+    throw new Error("Não foi possível consultar os episódios");
   }
 
-  return Promise.resolve({ metas: [] });
+  return response.json();
+}
+
+builder.defineCatalogHandler(async ({ type, id }) => {
+  if (type !== "series" || id !== "supernatural-br") {
+    return { metas: [] };
+  }
+
+  const show = await getShow();
+
+  return {
+    metas: [{
+      id: SHOW_ID,
+      type: "series",
+      name: "Supernatural",
+      poster: show.image?.original,
+      background: show.image?.original,
+      description: show.summary?.replace(/<[^>]*>/g, "") || "",
+      genres: show.genres || []
+    }]
+  };
 });
 
-builder.defineMetaHandler(({ type, id }) => {
-  if (type === "series" && id === "tt0460681") {
-    return Promise.resolve({ meta: supernatural });
+builder.defineMetaHandler(async ({ type, id }) => {
+  if (type !== "series" || id !== SHOW_ID) {
+    return { meta: null };
   }
 
-  return Promise.resolve({ meta: null });
+  const show = await getShow();
+
+  const episodes = show._embedded.episodes
+    .filter(ep => ep.season >= 1 && ep.season <= 15)
+    .map(ep => ({
+      id: `${SHOW_ID}:${ep.season}:${ep.number}`,
+      season: ep.season,
+      episode: ep.number,
+      title: ep.name,
+      released: ep.airdate
+        ? new Date(ep.airdate).toISOString()
+        : undefined,
+      overview: ep.summary?.replace(/<[^>]*>/g, "") || "",
+      thumbnail: ep.image?.original
+    }));
+
+  return {
+    meta: {
+      id: SHOW_ID,
+      type: "series",
+      name: "Supernatural",
+      poster: show.image?.original,
+      background: show.image?.original,
+      description: show.summary?.replace(/<[^>]*>/g, "") || "",
+      genres: show.genres || [],
+      videos: episodes
+    }
+  };
 });
 
 serveHTTP(builder.getInterface(), {
